@@ -144,7 +144,7 @@ services:
     networks:
       - stack
     ports:
-      - "127.0.0.1:5555:5555"
+      - "127.0.0.1:${STUDIO_PORT:-5556}:5555"
     environment: *shared-environment
     healthcheck:
       disable: true

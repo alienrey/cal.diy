@@ -42,6 +42,8 @@ The stack starts PostgreSQL, Redis, the web app on port 3000, and API v2 on port
 
 The web app proxies API requests to `http://calcom-api:80/v2` over the Docker network by default. Override `NEXT_PUBLIC_API_V2_URL` only when using an API hosted elsewhere. Web and API URL configuration is applied when the web container starts, so the same image works with different domains on different servers.
 
+Optional Prisma Studio uses the `studio` Compose profile and binds only to server loopback port 5556 (`STUDIO_PORT` can override it). Access it through an SSH tunnel when needed.
+
 Other build settings, including organization mode, are baked into the images. Configure the GitHub Actions repository variables `NEXT_PUBLIC_SINGLE_ORG_SLUG`, `ORGANIZATIONS_ENABLED`, `NEXT_PUBLIC_LICENSE_CONSENT`, `NEXT_PUBLIC_WEBSITE_TERMS_URL`, `NEXT_PUBLIC_WEBSITE_PRIVACY_POLICY_URL`, or `CSP_POLICY` before rebuilding if needed. Match organization settings in the server's `.env`.
 
 ## Pull an update or choose a version
