@@ -1,0 +1,161 @@
+# Configure deployment URLs and secrets in .env or in your deployment platform.
+
+volumes:
+  database-data:
+  redis-data:
+
+networks:
+  stack:
+
+x-shared-environment: &shared-environment
+  NODE_ENV: production
+  DATABASE_HOST: database:5432
+  DATABASE_URL: &database-url postgresql://${POSTGRES_USER:-calcom}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB:-calendso}
+  DATABASE_DIRECT_URL: *database-url
+  NEXT_PUBLIC_WEBAPP_URL: ${NEXT_PUBLIC_WEBAPP_URL:-http://localhost:3000}
+  NEXT_PUBLIC_WEBSITE_URL: ${NEXT_PUBLIC_WEBAPP_URL:-http://localhost:3000}
+  NEXT_PUBLIC_API_V2_URL: ${NEXT_PUBLIC_API_V2_URL:-http://calcom-api:80/v2}
+  NEXTAUTH_URL: ${NEXT_PUBLIC_WEBAPP_URL:-http://localhost:3000}/api/auth
+  NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET}
+  CALENDSO_ENCRYPTION_KEY: ${CALENDSO_ENCRYPTION_KEY:?Set CALENDSO_ENCRYPTION_KEY}
+  NEXT_PUBLIC_SINGLE_ORG_SLUG: ${NEXT_PUBLIC_SINGLE_ORG_SLUG:-}
+  ORGANIZATIONS_ENABLED: ${ORGANIZATIONS_ENABLED:-false}
+  CALCOM_TELEMETRY_DISABLED: ${CALCOM_TELEMETRY_DISABLED:-1}
+  EMAIL_FROM: ${EMAIL_FROM:-}
+  EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Cal.diy}
+  EMAIL_SERVER_HOST: ${EMAIL_SERVER_HOST:-}
+  EMAIL_SERVER_PORT: ${EMAIL_SERVER_PORT:-587}
+  EMAIL_SERVER_USER: ${EMAIL_SERVER_USER:-}
+  EMAIL_SERVER_PASSWORD: ${EMAIL_SERVER_PASSWORD:-}
+  CRON_API_KEY: ${CRON_API_KEY:?Set CRON_API_KEY}
+
+services:
+  database:
+    image: postgres:18
+    restart: always
+    volumes:
+      - database-data:/var/lib/postgresql
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-calcom}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-calendso}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - stack
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - stack
+
+  calcom:
+    image: &web-image ${CALCOM_IMAGE_NAMESPACE:-ghcr.io/alienrey/cal.diy}-web:${CALCOM_IMAGE_TAG:-latest}
+    pull_policy: always
+    restart: always
+    networks:
+      - stack
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    environment:
+      <<: *shared-environment
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+    depends_on:
+      database:
+        condition: service_healthy
+
+  calcom-api:
+    image: ${CALCOM_IMAGE_NAMESPACE:-ghcr.io/alienrey/cal.diy}-api:${CALCOM_IMAGE_TAG:-latest}
+    pull_policy: always
+    restart: always
+    networks:
+      - stack
+    ports:
+      - "${API_PORT:-5555}:80"
+    environment:
+      <<: *shared-environment
+      API_PORT: "80"
+      API_URL: ${API_URL:-http://localhost:5555}
+      DATABASE_READ_URL: *database-url
+      DATABASE_WRITE_URL: *database-url
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      API_KEY_PREFIX: ${API_KEY_PREFIX:-cal_}
+      WEB_APP_URL: ${NEXT_PUBLIC_WEBAPP_URL:-http://localhost:3000}
+      IS_E2E: ${IS_E2E:-false}
+      REWRITE_API_V2_PREFIX: ${REWRITE_API_V2_PREFIX:-1}
+      CALCOM_LICENSE_KEY: ${CALCOM_LICENSE_KEY:-}
+      NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      STRIPE_API_KEY: ${STRIPE_API_KEY:-sk_test_disabled}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_disabled}
+      STRIPE_PRICE_ID_STARTER: ${STRIPE_PRICE_ID_STARTER:-}
+      STRIPE_PRICE_ID_STARTER_OVERAGE: ${STRIPE_PRICE_ID_STARTER_OVERAGE:-}
+      STRIPE_PRICE_ID_ESSENTIALS: ${STRIPE_PRICE_ID_ESSENTIALS:-}
+      STRIPE_PRICE_ID_ESSENTIALS_OVERAGE: ${STRIPE_PRICE_ID_ESSENTIALS_OVERAGE:-}
+      STRIPE_PRICE_ID_ENTERPRISE: ${STRIPE_PRICE_ID_ENTERPRISE:-}
+      STRIPE_PRICE_ID_ENTERPRISE_OVERAGE: ${STRIPE_PRICE_ID_ENTERPRISE_OVERAGE:-}
+      STRIPE_TEAM_MONTHLY_PRICE_ID: ${STRIPE_TEAM_MONTHLY_PRICE_ID:-}
+      IS_TEAM_BILLING_ENABLED: ${IS_TEAM_BILLING_ENABLED:-false}
+      AXIOM_DATASET: ${AXIOM_DATASET:-}
+      AXIOM_TOKEN: ${AXIOM_TOKEN:-}
+      LOGGER_BRIDGE_LOG_LEVEL: ${LOGGER_BRIDGE_LOG_LEVEL:-1}
+      DOCS_URL: ${DOCS_URL:-https://cal.com/docs}
+      GET_LICENSE_KEY_URL: ${GET_LICENSE_KEY_URL:-https://console.cal.com/api/license}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:80/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # The web entrypoint applies migrations before serving requests.
+      calcom:
+        condition: service_healthy
+
+  # Studio has no authentication, so production deployments must opt in explicitly.
+  studio:
+    profiles: ["studio"]
+    image: *web-image
+    pull_policy: always
+    restart: always
+    networks:
+      - stack
+    ports:
+      - "127.0.0.1:${STUDIO_PORT:-5556}:5555"
+    environment: *shared-environment
+    healthcheck:
+      disable: true
+    depends_on:
+      database:
+        condition: service_healthy
+    command:
+      - npx
+      - prisma
+      - studio
+      - --schema
+      - /calcom/packages/prisma/schema.prisma
+      - --hostname
+      - 0.0.0.0

@@ -1,5 +1,9 @@
 # Deploy with Coolify
 
+To pull your own prebuilt web/API images on any Docker server, see [Deploy published container images](containers.md). That configuration also works with Coolify's Docker Compose build pack.
+
+## Build images on the server
+
 The root `docker-compose.yml` builds the web app and API v2 from this repository and starts PostgreSQL and Redis with persistent volumes. It does not require a local `.env` file.
 
 1. Create an Application from this Git repository in Coolify and choose **Docker Compose** as the build pack.
