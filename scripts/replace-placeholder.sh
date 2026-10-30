@@ -1,13 +1,30 @@
-FROM=$1
-TO=$2
+#!/bin/sh
+set -eu
 
-if [ "${FROM}" = "${TO}" ]; then
-    echo "Nothing to replace, the value is already set to ${TO}."
-    exit 0
-fi
+node - "$1" "$2" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const process = require("node:process");
 
-echo "Replacing all statically built instances of $FROM with $TO."
+const [from, to] = process.argv.slice(2);
+if (!from || !to) throw new Error("Both build-time and runtime URLs are required");
+if (from === to) process.exit(0);
 
-for file in $(egrep -r -l "${FROM}" apps/web/.next/ apps/web/public/); do
-    sed -i -e "s|$FROM|$TO|g" "$file"
-done
+function replaceInDirectory(directory) {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      replaceInDirectory(file);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const contents = fs.readFileSync(file);
+    if (!contents.includes(from)) continue;
+    // URLs must be literal: dots, query strings and ampersands have special meaning in sed.
+    fs.writeFileSync(file, contents.toString("utf8").split(from).join(to));
+  }
+}
+
+replaceInDirectory("apps/web/.next");
+replaceInDirectory("apps/web/public");
+NODE
